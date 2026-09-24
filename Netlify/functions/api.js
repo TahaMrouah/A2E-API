@@ -1,4 +1,3 @@
-
 import serverless from "serverless-http";
 
 import {
@@ -6,28 +5,12 @@ import {
     connectDB
 } from "../../server.js";
 
-
-const handler = async (
-    event,
-    context
-) => {
-
+const handler = async (event, context) => {
     await connectDB();
 
+    const expressHandler = serverless(app);
 
-    const expressHandler =
-        serverless(app);
-
-
-    return expressHandler(
-        event,
-        context
-    );
-
+    return expressHandler(event, context);
 };
 
-
-export {
-    handler
-};
-
+export { handler };
