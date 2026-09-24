@@ -5,10 +5,10 @@ import {
     connectDB
 } from "../../server.js";
 
+const expressHandler = serverless(app);
+
 const handler = async (event, context) => {
     await connectDB();
-
-    const expressHandler = serverless(app);
 
     return expressHandler(event, context);
 };
