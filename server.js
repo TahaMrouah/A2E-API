@@ -55,10 +55,30 @@ const app = express();
 // MIDDLEWARE
 // ========================================
 
+const allowedOrigins = [
+    "https://a2eimmo.ma",
+    "https://www.a2eimmo.ma",
+    "http://localhost:5173",
+];
+
 app.use(
     cors({
-        origin:
-            "https://a2eimmo.ma",
+        origin: function (origin, callback) {
+
+            if (!origin) {
+                return callback(null, true);
+            }
+
+            if (allowedOrigins.includes(origin)) {
+                return callback(null, true);
+            }
+
+            return callback(
+                new Error("Not allowed by CORS")
+            );
+
+        },
+
         credentials: true,
     })
 );
@@ -71,8 +91,6 @@ app.use(
 
     })
 );
-
-
 app.use(
     cookieParser()
 );
