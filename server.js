@@ -58,7 +58,7 @@ const app = express();
 app.use(
     cors({
         origin:
-            "https://a2eimmo.ma/",
+            "https://a2eimmo.ma",
         credentials: true,
     })
 );
