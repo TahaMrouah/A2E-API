@@ -6,7 +6,9 @@ import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import path from "path";
 import { fileURLToPath } from "url";
-
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import collaborationRoutes from "./routes/collaboratorRoutes.js";
 import propertyRoutes from "./routes/propertyRoutes.js";
 import authRoutes from "./routes/auth.js";
 
@@ -94,7 +96,8 @@ app.use(
 app.use(
     cookieParser()
 );
-
+app.disable("x-powered-by");
+app.use(helmet());
 
 // ========================================
 // BASIC ROUTE
@@ -131,7 +134,7 @@ app.use(
     propertyRoutes
 );
 
-
+app.use("/api/collaboration", collaborationRoutes);
 // ========================================
 // MONGODB CONNECTION
 // ========================================
