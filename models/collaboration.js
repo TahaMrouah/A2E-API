@@ -3,6 +3,13 @@ import mongoose from "mongoose";
 
 const collaborationSchema = new mongoose.Schema(
   {
+
+    status: {
+      type: String,
+      enum: ["pending", "accepted", "rejected"],
+      default: "pending",
+    },
+
     firstName: {
       type: String,
       required: true,

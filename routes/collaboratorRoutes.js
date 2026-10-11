@@ -2,12 +2,16 @@
 import express from "express";
 import rateLimit from "express-rate-limit";
 import jwt from "jsonwebtoken";
-
 import Admin from "../models/admin.js";
+
 import {
   createCollaboration,
   getCollaborations,
+  acceptCollaboration,
+  deleteCollaboration,
 } from "../controllers/collaboratorController.js";
+import { collaborationLimiter } from "../middleware/collabeLimiter.js";
+
 
 const router = express.Router();
 
@@ -21,10 +25,10 @@ const submissionLimiter = rateLimit({
   },
 });
 
-// Public endpoint: submit a collaboration request
+// Public endpoint: submit a collaboration request.
 router.post("/", submissionLimiter, createCollaboration);
 
-// Verify the existing admin cookie
+// Protect admin-only endpoints using the existing admin cookie.
 const requireAdmin = async (req, res, next) => {
   try {
     const token = req.cookies?.adminToken;
@@ -60,7 +64,8 @@ const requireAdmin = async (req, res, next) => {
   }
 };
 
-// Protected endpoint: retrieve all collaboration requests
 router.get("/", requireAdmin, getCollaborations);
-
+router.patch("/:id/accept", requireAdmin, acceptCollaboration);
+router.delete("/:id", requireAdmin, deleteCollaboration);
+router.post("/", collaborationLimiter, createCollaboration);
 export default router;
