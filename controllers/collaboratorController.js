@@ -76,12 +76,83 @@ if (existing) {
       consent,
     });
 
-    return res.status(201).json({
-      message: "Your collaboration request was submitted successfully.",
-      collaboration: {
-        id: collaboration._id,
-      },
-    });
+   
+const fullName =
+  `${collaboration.firstName} ${collaboration.lastName}`.trim();
+
+const adminEmail =
+  process.env.ADMIN_NOTIFICATION_EMAIL || process.env.MAIL_USER;
+
+const emailJobs = [];
+
+// Notify the A2E admin.
+if (adminEmail) {
+  emailJobs.push({
+    type: "admin",
+    promise: sendMail({
+      to: adminEmail,
+      subject: "A2E Immobilier — Nouvelle demande de collaboration",
+      text: `Une nouvelle demande de collaboration a été reçue.
+
+Nom : ${fullName}
+Email : ${collaboration.email}
+Téléphone : ${collaboration.phone}
+Ville : ${collaboration.city || "Non précisée"}
+Bien : ${collaboration.propertyTitle || collaboration.propertyType || "Non précisé"}
+Localisation : ${collaboration.propertyLocation || "Non précisée"}
+
+Connectez-vous au tableau de bord A2E Immobilier pour consulter la demande.`,
+    }),
+  });
+}
+
+// Confirm receipt to the collaborator.
+if (collaboration.email) {
+  emailJobs.push({
+    type: "collaborator",
+    promise: sendMail({
+      to: collaboration.email,
+      subject: "Confirmation de réception — A2E Immobilier",
+      text: `Bonjour ${fullName},
+
+Nous avons bien reçu votre demande de collaboration concernant votre bien immobilier.
+
+Notre équipe étudiera votre demande et vous contactera prochainement.
+
+Merci pour votre confiance.
+
+Cordialement,
+A2E Immobilier`,
+    }),
+  });
+}
+
+const emailResults = await Promise.allSettled(
+  emailJobs.map((job) => job.promise)
+);
+
+const emailStatus = {};
+
+emailResults.forEach((result, index) => {
+  const type = emailJobs[index].type;
+  emailStatus[type] = result.status === "fulfilled";
+
+  if (result.status === "rejected") {
+    console.error(
+      `Collaboration ${type} email failed:`,
+      result.reason?.message || result.reason
+    );
+  }
+});
+
+return res.status(201).json({
+  message: "Votre demande a bien été enregistrée.",
+  collaboration: {
+    id: collaboration._id,
+  },
+  emailStatus,
+});
+
   } catch (error) {
     console.error("Create collaboration error:", error);
 
