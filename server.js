@@ -11,7 +11,7 @@ import rateLimit from "express-rate-limit";
 import collaborationRoutes from "./routes/collaboratorRoutes.js";
 import propertyRoutes from "./routes/propertyRoutes.js";
 import authRoutes from "./routes/auth.js";
-
+import projectUnitRoutes from "./routes/projectsRoutes.js";
 
 // ========================================
 // FILE PATH
@@ -98,7 +98,7 @@ app.use(
 );
 app.disable("x-powered-by");
 app.use(helmet());
-
+app.use("/api/projects", projectUnitRoutes);
 // ========================================
 // BASIC ROUTE
 // ========================================
