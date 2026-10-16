@@ -2,7 +2,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
-import dotenv from "dotenv";
+import  dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -12,7 +12,7 @@ import collaborationRoutes from "./routes/collaboratorRoutes.js";
 import propertyRoutes from "./routes/propertyRoutes.js";
 import authRoutes from "./routes/auth.js";
 import projectUnitRoutes from "./routes/projectsRoutes.js";
-
+import { verifyMailer } from "./utils/mailer.js";
 // ========================================
 // FILE PATH
 // ========================================
@@ -215,41 +215,26 @@ if (
     const PORT =5000;
 
 
-    const startServer = async () => {
+  const startServer = async () => {
+    await connectDB();
 
-        await connectDB();
-
-
-        app.listen(
-            PORT,
-            () => {
-
-                console.log(
-                    "================================="
-                );
-
-
-                console.log(
-                    `A2E API running on port ${PORT}`
-                );
-
-
-                console.log(
-                    `http://localhost:${PORT}`
-                );
-
-
-                console.log(
-                    "================================="
-                );
-
-            }
+    try {
+        await verifyMailer();
+        console.log("✅ A2E email SMTP connection verified.");
+    } catch (error) {
+        console.error(
+            "❌ A2E email SMTP verification failed:",
+            error.message
         );
+    }
 
-    };
-
-
-    startServer();
-
+    app.listen(PORT, () => {
+        console.log("=================================");
+        console.log(`A2E API running on port ${PORT}`);
+        console.log(`http://localhost:${PORT}`);
+        console.log("=================================");
+    });
+};
+startServer();
 }
 

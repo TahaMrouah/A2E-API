@@ -1,289 +1,377 @@
 
-import Collaboration from "../models/collaboration.js";
-
+import Collaboration from "../models/Collaboration.js";
 import { sendMail } from "../utils/mailer.js";
 
-// Save a new collaboration request in MongoDB
-export const createCollaboration = async (req, res) => {
-  try {
-    const {
-      firstName,
-      lastName,
-      email,
-      phone,
-      city,
-      preferredContact,
-      propertyType,
-      propertyTitle,
-      propertyLocation,
-      propertySurface,
-      builtSurface,
-      bedrooms,
-      bathrooms,
-      condition,
-      ownership,
-      estimatedPrice,
-      sellingReason,
-      availability,
-      description,
-      consent,
-    } = req.body;
+// ========================================
+// EMAIL HELPERS
+// ========================================
 
-    // Required-field validation
-    if (
-      !firstName?.trim() ||
-      !lastName?.trim() ||
-      !email?.trim() ||
-      !phone?.trim() ||
-      !consent
-    ) {
-      return res.status(400).json({
-        message: "Please complete all required fields and accept consent.",
-      });
-    }
-const since = new Date(Date.now() - 24 * 60 * 60 * 1000); // last 24h
+const getAdminEmail = () =>
+    process.env.ADMIN_NOTIFICATION_EMAIL || process.env.MAIL_USER || "";
 
-const existing = await Collaboration.findOne({
-  $or: [{ email: req.body.email }, { phone: req.body.phone }],
-  createdAt: { $gte: since },
-});
+const getFullName = (collaboration) =>
+    `${collaboration.firstName || ""} ${collaboration.lastName || ""}`.trim();
 
-if (existing) {
-  return res.status(429).json({
-    message: "Vous avez déjà envoyé une demande récemment. Notre équipe vous contactera bientôt.",
-  });
-}
-    const collaboration = await Collaboration.create({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email.trim().toLowerCase(),
-      phone: phone.trim(),
-      city,
-      preferredContact,
-      propertyType,
-      propertyTitle,
-      propertyLocation,
-      propertySurface,
-      builtSurface,
-      bedrooms,
-      bathrooms,
-      condition,
-      ownership,
-      estimatedPrice,
-      sellingReason,
-      availability,
-      description,
-      consent,
+const getPropertyDescription = (collaboration) =>
+     collaboration.propertyType ||
+     collaboration.propertyTitle ||
+    "Non précisé";
+
+const runEmailJobs = async (jobs) => {
+    const emailStatus = {
+        admin: false,
+        collaborator: false,
+    };
+
+    const results = await Promise.allSettled(
+        jobs.map((job) => job.promise)
+    );
+
+    results.forEach((result, index) => {
+        const type = jobs[index].type;
+
+        emailStatus[type] = result.status === "fulfilled";
+
+        if (result.status === "rejected") {
+            console.error(
+                `Collaboration ${type} email failed:`,
+                result.reason?.message || result.reason
+            );
+        }
     });
 
-   
-const fullName =
-  `${collaboration.firstName} ${collaboration.lastName}`.trim();
+    return {
+        emailStatus,
+        emailSent:
+            emailStatus.admin && emailStatus.collaborator,
+    };
+};
 
-const adminEmail =
-  process.env.ADMIN_NOTIFICATION_EMAIL || process.env.MAIL_USER;
+// ========================================
+// CREATE COLLABORATION
+// POST /api/collaboration
+// ========================================
 
-const emailJobs = [];
+export const createCollaboration = async (req, res) => {
+    try {
+        const {
+            firstName,
+            lastName,
+            email,
+            phone,
+            consent,
+        } = req.body;
 
-// Notify the A2E admin.
-if (adminEmail) {
-  emailJobs.push({
-    type: "admin",
-    promise: sendMail({
-      to: adminEmail,
-      subject: "A2E Immobilier — Nouvelle demande de collaboration",
-      text: `Une nouvelle demande de collaboration a été reçue.
+        // Validate required fields
+        if (
+            !firstName?.trim() ||
+            !lastName?.trim() ||
+            !email?.trim() ||
+            !phone?.trim()
+        ) {
+            return res.status(400).json({
+                message:
+                    "Veuillez remplir tous les champs obligatoires.",
+            });
+        }
+
+        if (consent !== true && consent !== "true") {
+            return res.status(400).json({
+                message:
+                    "Vous devez accepter les conditions pour continuer.",
+            });
+        }
+
+        const normalizedEmail = email.trim().toLowerCase();
+        const normalizedPhone = phone.trim();
+
+        const emailPattern =
+            /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+        if (!emailPattern.test(normalizedEmail)) {
+            return res.status(400).json({
+                message:
+                    "Veuillez saisir une adresse email valide.",
+            });
+        }
+
+        // Prevent duplicate requests within the last 24 hours
+        const twentyFourHoursAgo = new Date(
+            Date.now() - 24 * 60 * 60 * 1000
+        );
+
+        const existingCollaboration =
+            await Collaboration.findOne({
+                createdAt: { $gte: twentyFourHoursAgo },
+                $or: [
+                    { email: normalizedEmail },
+                    { phone: normalizedPhone },
+                ],
+            });
+
+        if (existingCollaboration) {
+            return res.status(409).json({
+                message:
+                    "Votre demande est déjà enregistrée ou en cours de traitement. Veuillez patienter, nous vous contacterons prochainement.",
+                duplicate: true,
+            });
+        }
+
+        // Save the request first, independently of email delivery
+        const collaboration = await Collaboration.create({
+            ...req.body,
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            email: normalizedEmail,
+            phone: normalizedPhone,
+            consent: true,
+            status: "pending",
+        });
+
+        const fullName = getFullName(collaboration);
+        const adminEmail = getAdminEmail();
+
+        const jobs = [];
+
+        // Notify A2E about the new request
+        if (adminEmail) {
+            jobs.push({
+                type: "admin",
+                promise: sendMail({
+                    to: adminEmail,
+                    subject:
+                        "A2E Immobilier — Nouvelle demande de collaboration",
+                    text: `Une nouvelle demande de collaboration a été reçue.
 
 Nom : ${fullName}
 Email : ${collaboration.email}
 Téléphone : ${collaboration.phone}
 Ville : ${collaboration.city || "Non précisée"}
-Bien : ${collaboration.propertyTitle || collaboration.propertyType || "Non précisé"}
-Localisation : ${collaboration.propertyLocation || "Non précisée"}
+Bien : ${getPropertyDescription(collaboration)}
+
+Connectez-vous au tableau de bord A2E Immobilier pour consulter cette demande.`,
+                }),
+            });
+        } else {
+            console.error(
+                "Collaboration admin email failed: ADMIN_NOTIFICATION_EMAIL and MAIL_USER are missing."
+            );
+        }
+
+        // Send confirmation to the collaborator
+        if (collaboration.email) {
+            jobs.push({
+                type: "collaborator",
+                promise: sendMail({
+                    to: collaboration.email,
+                    subject:
+                        "Confirmation de votre demande — A2E Immobilier",
+                    text: `Bonjour ${fullName},
+
+Nous avons bien reçu votre demande de collaboration avec A2E Immobilier.
+
+Notre équipe va étudier votre demande et vous contactera prochainement.
+
+Cordialement,
+L'équipe A2E Immobilier`,
+                }),
+            });
+        }
+
+        const { emailStatus, emailSent } =
+            await runEmailJobs(jobs);
+
+        return res.status(201).json({
+            message:
+                "Votre demande de collaboration a bien été enregistrée.",
+            collaboration,
+            id: collaboration._id,
+            emailSent,
+            emailStatus,
+        });
+    } catch (error) {
+        console.error(
+            "Create collaboration failed:",
+            error.message
+        );
+
+        return res.status(500).json({
+            message:
+                "Une erreur est survenue lors de l'enregistrement de votre demande.",
+        });
+    }
+};
+
+// ========================================
+// GET ALL COLLABORATIONS
+// GET /api/collaboration
+// ========================================
+
+export const getCollaborations = async (req, res) => {
+    try {
+        const collaborations =
+            await Collaboration.find().sort({
+                createdAt: -1,
+            });
+
+        return res.status(200).json({
+            collaborations,
+        });
+    } catch (error) {
+        console.error(
+            "Get collaborations failed:",
+            error.message
+        );
+
+        return res.status(500).json({
+            message:
+                "Impossible de récupérer les demandes de collaboration.",
+        });
+    }
+};
+
+// ========================================
+// ACCEPT COLLABORATION
+// PATCH /api/collaboration/:id/accept
+// ========================================
+
+export const acceptCollaboration = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const collaboration =
+            await Collaboration.findById(id);
+
+        if (!collaboration) {
+            return res.status(404).json({
+                message:
+                    "Demande de collaboration introuvable.",
+            });
+        }
+
+        // Do not send acceptance emails repeatedly
+        if (collaboration.status === "accepted") {
+            return res.status(200).json({
+                message:
+                    "Cette demande a déjà été acceptée.",
+                collaboration,
+                emailSent: false,
+                alreadyAccepted: true,
+            });
+        }
+
+        // Save acceptance before attempting emails
+        collaboration.status = "accepted";
+        await collaboration.save();
+
+        const fullName = getFullName(collaboration);
+        const adminEmail = getAdminEmail();
+
+        const jobs = [];
+
+        // Notify A2E that the request was accepted
+        if (adminEmail) {
+            jobs.push({
+                type: "admin",
+                promise: sendMail({
+                    to: adminEmail,
+                    subject:
+                        "A2E Immobilier — Demande de collaboration acceptée",
+                    text: `La demande de ${fullName} a été acceptée.
+
+Email : ${collaboration.email || "Non renseigné"}
+Téléphone : ${collaboration.phone || "Non renseigné"}
+Bien : ${getPropertyDescription(collaboration)}
+Ville : ${collaboration.city || "Non précisée"}
 
 Connectez-vous au tableau de bord A2E Immobilier pour consulter la demande.`,
-    }),
-  });
-}
+                }),
+            });
+        } else {
+            console.error(
+                "Collaboration admin email failed: ADMIN_NOTIFICATION_EMAIL and MAIL_USER are missing."
+            );
+        }
 
-// Confirm receipt to the collaborator.
-if (collaboration.email) {
-  emailJobs.push({
-    type: "collaborator",
-    promise: sendMail({
-      to: collaboration.email,
-      subject: "Confirmation de réception — A2E Immobilier",
-      text: `Bonjour ${fullName},
+        // Notify the collaborator of acceptance
+        if (collaboration.email) {
+            jobs.push({
+                type: "collaborator",
+                promise: sendMail({
+                    to: collaboration.email,
+                    subject:
+                        "Votre demande de collaboration a été acceptée — A2E Immobilier",
+                    text: `Bonjour ${fullName},
 
-Nous avons bien reçu votre demande de collaboration concernant votre bien immobilier.
+Nous avons le plaisir de vous confirmer que votre demande de collaboration avec A2E Immobilier a été acceptée.
 
-Notre équipe étudiera votre demande et vous contactera prochainement.
+Notre équipe vous contactera prochainement pour la suite.
 
 Merci pour votre confiance.
 
 Cordialement,
-A2E Immobilier`,
-    }),
-  });
-}
+L'équipe A2E Immobilier`,
+                }),
+            });
+        }
 
-const emailResults = await Promise.allSettled(
-  emailJobs.map((job) => job.promise)
-);
+        const { emailStatus, emailSent } =
+            await runEmailJobs(jobs);
 
-const emailStatus = {};
+        return res.status(200).json({
+            message: emailSent
+                ? "Demande acceptée. Les notifications email ont été envoyées."
+                : "Demande acceptée, mais une ou plusieurs notifications email ont échoué. Consultez les logs du serveur.",
+            collaboration,
+            emailSent,
+            emailStatus,
+        });
+    } catch (error) {
+        console.error(
+            "Accept collaboration failed:",
+            error.message
+        );
 
-emailResults.forEach((result, index) => {
-  const type = emailJobs[index].type;
-  emailStatus[type] = result.status === "fulfilled";
-
-  if (result.status === "rejected") {
-    console.error(
-      `Collaboration ${type} email failed:`,
-      result.reason?.message || result.reason
-    );
-  }
-});
-
-return res.status(201).json({
-  message: "Votre demande a bien été enregistrée.",
-  collaboration: {
-    id: collaboration._id,
-  },
-  emailStatus,
-});
-
-  } catch (error) {
-    console.error("Create collaboration error:", error);
-
-    return res.status(500).json({
-      message: "Unable to submit your request. Please try again later.",
-    });
-  }
+        return res.status(500).json({
+            message:
+                "Une erreur est survenue lors de l'acceptation de la demande.",
+        });
+    }
 };
 
-// Retrieve collaboration requests for the admin dashboard
-export const getCollaborations = async (req, res) => {
-  try {
-    const collaborations = await Collaboration.find()
-      .sort({ createdAt: -1 })
-      .lean();
-
-    return res.status(200).json({ collaborations });
-  } catch (error) {
-    console.error("Get collaborations error:", error);
-
-    return res.status(500).json({
-      message: "Unable to retrieve collaboration requests.",
-    });
-  }
-};
-
-export const acceptCollaboration = async (req, res) => {
-  try {
-    const collaboration = await Collaboration.findById(req.params.id);
-
-    if (!collaboration) {
-      return res.status(404).json({
-        message: "Demande de collaboration introuvable.",
-      });
-    }
-
-    const wasAlreadyAccepted = collaboration.status === "accepted";
-
-    // Save the acceptance before trying to send emails.
-    collaboration.status = "accepted";
-    await collaboration.save();
-
-    if (wasAlreadyAccepted) {
-      return res.status(200).json({
-        message: "Cette demande est déjà acceptée.",
-        collaboration,
-        emailSent: null,
-      });
-    }
-
-    const fullName =
-      `${collaboration.firstName || ""} ${collaboration.lastName || ""}`.trim();
-
-    const emailJobs = [
-      sendMail({
-        to: process.env.ADMIN_NOTIFICATION_EMAIL || process.env.MAIL_USER,
-        subject: "A2E Immobilier — Demande de collaboration acceptée",
-        text: `La demande de ${fullName} a été acceptée.
-
-Email : ${collaboration.email || "Non renseigné"}
-Téléphone : ${collaboration.phone || "Non renseigné"}
-Bien : ${collaboration.propertyTitle || collaboration.propertyType || "Non précisé"}
-Ville : ${collaboration.city || "Non précisée"}
-
-Connectez-vous au tableau de bord A2E Immobilier pour consulter la demande.`,
-      }),
-    ];
-
-    // Notify the collaborator as well, if an email address exists.
-    if (collaboration.email) {
-      emailJobs.push(
-        sendMail({
-          to: collaboration.email,
-          subject: "Votre demande de collaboration — A2E Immobilier",
-          text: `Bonjour ${fullName || ""},
-
-Nous vous confirmons que votre demande de collaboration avec A2E Immobilier a été acceptée.
-
-Notre équipe vous contactera prochainement pour la suite.
-
-Cordialement,
-A2E Immobilier`,
-        })
-      );
-    }
-
-    const results = await Promise.allSettled(emailJobs);
-    const emailSent = results.every((result) => result.status === "fulfilled");
-
-    if (!emailSent) {
-      console.error(
-        "One or more collaboration emails failed:",
-        results
-          .filter((result) => result.status === "rejected")
-          .map((result) => result.reason?.message)
-      );
-    }
-
-    return res.status(200).json({
-      message: emailSent
-        ? "Demande acceptée. Les notifications email ont été envoyées."
-        : "Demande acceptée, mais au moins une notification email a échoué.",
-      collaboration,
-      emailSent,
-    });
-  } catch (error) {
-    console.error("Accept collaboration error:", error);
-    return res.status(500).json({
-      message: "Impossible d'accepter cette demande.",
-    });
-  }
-};
+// ========================================
+// DELETE COLLABORATION
+// DELETE /api/collaboration/:id
+// ========================================
 
 export const deleteCollaboration = async (req, res) => {
-  try {
-    const collaboration = await Collaboration.findByIdAndDelete(req.params.id);
+    try {
+        const { id } = req.params;
 
-    if (!collaboration) {
-      return res.status(404).json({
-        message: "Demande de collaboration introuvable.",
-      });
+        const collaboration =
+            await Collaboration.findByIdAndDelete(id);
+
+        if (!collaboration) {
+            return res.status(404).json({
+                message:
+                    "Demande de collaboration introuvable.",
+            });
+        }
+
+        return res.status(200).json({
+            message:
+                "La demande de collaboration a été supprimée.",
+            id,
+        });
+    } catch (error) {
+        console.error(
+            "Delete collaboration failed:",
+            error.message
+        );
+
+        return res.status(500).json({
+            message:
+                "Impossible de supprimer cette demande de collaboration.",
+        });
     }
-
-    return res.status(200).json({
-      message: "Demande de collaboration supprimée.",
-      deletedId: req.params.id,
-    });
-  } catch (error) {
-    console.error("Delete collaboration error:", error);
-    return res.status(500).json({
-      message: "Impossible de supprimer cette demande.",
-    });
-  }
 };
