@@ -1,5 +1,5 @@
 
-import Collaboration from "../models/Collaboration.js";
+import Collaboration from "../models/collaboration.js";
 import { sendMail } from "../utils/mailer.js";
 
 // ========================================
