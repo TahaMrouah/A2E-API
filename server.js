@@ -59,6 +59,8 @@ const app = express();
 
 const allowedOrigins = [
     "https://a2eimmo.ma",
+    "https://www.a2eimmo.ma",
+    
 ];
 
 app.use(
