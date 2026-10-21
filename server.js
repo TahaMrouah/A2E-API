@@ -59,8 +59,6 @@ const app = express();
 
 const allowedOrigins = [
     "https://a2eimmo.ma",
-    "https://www.a2eimmo.ma",
-    "http://localhost:5173",
 ];
 
 app.use(
